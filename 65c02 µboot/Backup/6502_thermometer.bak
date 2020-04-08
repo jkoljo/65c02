@@ -1,0 +1,154 @@
+PORTB = $6000
+PORTA = $6001
+DDRB = $6002
+DDRA = $6003
+
+VALUE = %11011010
+
+LCD_NUM = %00110000
+
+E  = %10000000
+RW = %01000000
+RS = %00100000
+
+SD = %00000001
+CK = %00000010
+L  = %00000100
+
+  .org $8000
+
+reset:
+  lda #%11111111 ; Set all pins on port B to output
+  sta DDRB
+
+  lda #%11100110 ; Set top 3 and 2 second lower most pins on port A to output
+  sta DDRA
+
+  lda #%00111000 ; Set 8-bit mode; 2-line display; 5x8 font
+  jsr lcd_instruction
+
+  lda #%00001110 ; Display on; cursor on; blink off
+  jsr lcd_instruction
+
+  lda #%00000110 ; Increment and shift cursor; don't shift display
+  jsr lcd_instruction
+
+  lda #%00000001 ; Clear display
+  jsr lcd_instruction
+
+loop:
+  jsr fetch_shift_register
+  sta $0
+
+  lda #%00000001 ; Clear display
+  jsr lcd_instruction
+
+  lda #"J"
+  jsr lcd_printa
+
+  lda #"K"
+  jsr lcd_printa
+
+  lda #"-"
+  jsr lcd_printa
+
+  lda $0
+  jsr print_a
+
+  jmp loop
+
+latch_sr: ; Probably needs to latch twice, first gets falling edge to adc, next gets rising to SR
+  lda #L         ; UnLatch (shift register listens to parallel input)
+  sta PORTA
+  lda #%00000000 ; Latch - output zero (shift register listens to serial side) 
+  sta PORTA				
+  rts
+
+shift_advance:
+  lda #CK
+  sta PORTA
+  lda #%00000000 ; Clock to zero
+  sta PORTA
+  rts  
+
+get_sr_bit: 
+  lda PORTA
+  and #SD 	  	 ; Get first bit from PORTA with mask SD
+  rts
+
+lcd_instruction:
+  sta PORTB
+  lda #0         ; Clear RS/RW/E bits
+  sta PORTA
+  lda #E         ; Set E bit to send instruction
+  sta PORTA
+  lda #0         ; Clear RS/RW/E bits
+  sta PORTA
+  rts
+
+lcd_printa:
+  sta PORTB
+  lda #RS         ; Set RS; Clear RW/E bits
+  sta PORTA
+  lda #(RS | E)   ; Set E bit to send instruction
+  sta PORTA
+  lda #RS         ; Clear E bits
+  sta PORTA
+  rts
+
+fetch_shift_register:  
+  jsr latch_sr	 
+  ldy #8
+  lda #0
+  sta $0
+
+inputdata:
+  jsr get_sr_bit
+  ora $0
+  sta $0
+  dey
+  bne shift_and_getnew
+  rts
+
+shift_and_getnew:
+  asl
+  sta $0
+  jsr shift_advance
+  jsr get_sr_bit
+  jmp inputdata
+
+print_a:
+  ldx #0        ; Remember 2nd (10ths) digit in accumulator X
+  ldy #0		; Remember 3rd (100ths) digit in accumulator Y
+  
+dissect:
+  cmp #100 		; Is A larger or equal than 100?
+  bcs sub100
+  cmp #10		; Is A larger or equal than 10?
+  bcs sub10
+  sta $3000
+  tya
+  adc #LCD_NUM
+  jsr lcd_printa
+  txa
+  adc #LCD_NUM
+  jsr lcd_printa
+  lda $3000
+  adc #LCD_NUM
+  jsr lcd_printa
+  rts
+
+sub10:
+  sbc #10
+  inx
+  jmp dissect
+
+sub100:
+  sbc #100
+  iny
+  jmp dissect
+
+
+  .org $fffc
+  .word reset
+  .word $0000

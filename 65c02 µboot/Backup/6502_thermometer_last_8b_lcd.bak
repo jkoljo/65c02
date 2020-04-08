@@ -1,0 +1,169 @@
+PORTB = $6000
+PORTA = $6001
+DDRB = $6002
+DDRA = $6003
+SR = $600A
+ACR = $600B
+PCR = $600C
+IFR = $600D
+
+VALUE = %11011010
+
+LCD_NUM = %00110000
+
+E  		= %10000011
+RW 		= %01000011
+RS 		= %00100011
+
+CLR 	= %00000011
+CONVERT = %00000001
+LATCH 	= %00000010
+
+  .org $8000
+
+; Initialize peripherals
+reset:
+  ; Initialize VIA
+  lda #%11111111	; All pins on port B to output
+  sta DDRB
+  stz PORTB
+
+  lda #%11100011	; Top 3 and lowest pin on A to output
+  sta DDRA
+  stz PORTA
+
+  lda #%00001000	; Disable T1 & T2, SR = input under PHI2, disable latching
+  sta ACR
+
+  ; Initialize LCD
+  lda #%00111000	; Set 8-bit mode; 2-line display; 5x8 font
+  jsr lcd_instruction
+
+  lda #%00001110	; Display on; cursor on; blink off
+  jsr lcd_instruction
+
+  lda #%00000110	; Increment and shift cursor; don't shift display
+  jsr lcd_instruction
+
+  lda #%00000001	; Clear display
+  jsr lcd_instruction
+
+  lda #>welcomestring
+  sta $11
+  lda #<welcomestring
+  sta $10
+  jsr print_str
+
+  ldx #10
+delay:
+  dex
+  cpx #0
+  bne delay 
+
+  lda #%00000001	; Clear display
+  jsr lcd_instruction
+
+  lda #>adcstring
+  sta $11
+  lda #<adcstring
+  sta $10
+  jsr print_str
+
+loop:
+  jsr read_adc 		; Read out data in SR			
+  jsr print_integer
+
+  lda #%00010000	; Move display to the left
+  jsr lcd_instruction
+
+  lda #%00010000	; Move display to the left
+  jsr lcd_instruction
+
+  lda #%00010000	; Move display to the left
+  jsr lcd_instruction
+
+  jmp loop
+
+print_str:
+  ldy #0
+print_individual:
+  lda ($10),Y
+  cmp #255
+  beq print_done
+  jsr lcd_printa
+  iny
+  jmp print_individual
+print_done:
+  rts
+
+read_adc:
+  lda #CLR 			; SR to parallel (listen) mode
+  sta PORTA
+  lda #CONVERT 		; WD low for min. 600 ns triggers conversion on ADC, keep SR listening 
+  sta PORTA 
+  lda #CLR			; WR high again, ADC has data available in 600 ns from now, SR listening
+  sta PORTA
+  lda #LATCH		; Latch SR, serial mode
+  sta PORTA
+  lda SR 			; Read SR from previous round. This triggers new async SR read
+  rts
+
+lcd_instruction:
+  sta PORTB
+  lda #CLR
+  sta PORTA 		; Clear RS/RW/E bits
+  lda #E 			; Set E bit to send instruction
+  sta PORTA
+  lda #CLR
+  sta PORTA 		; Clear RS/RW/E bits
+  rts 
+
+lcd_printa:
+  sta PORTB
+  lda #RS 			; Set RS; Clear RW/E bits
+  sta PORTA
+  lda #(RS | E) 	; Set E bit to send instruction
+  sta PORTA
+  lda #RS 			; Clear E bits
+  sta PORTA
+  rts
+ 				
+print_integer:
+  ldx #0 			; 2nd (10ths) digit in accumulator X
+  ldy #0			; 3rd (100ths) digit in accumulator Y
+d100:
+  cmp #100 			; Is A larger or equal than 100?
+  bcs sub100
+d10:
+  cmp #10			; Is A larger or equal than 10?
+  bcs sub10
+  sta $3000
+  tya
+  adc #LCD_NUM
+  jsr lcd_printa
+  txa
+  adc #LCD_NUM
+  jsr lcd_printa
+  lda $3000
+  adc #LCD_NUM
+  jsr lcd_printa
+  rts
+sub10:
+  sbc #10
+  inx
+  jmp d10
+sub100:
+  sbc #100
+  iny
+  jmp d100
+
+; Strings for use in printing
+adcstring:
+  db "Raw ADC ",255
+
+welcomestring:
+  db "Juha Koljonen",255
+
+  .org $fffc
+  .word reset
+  .word $0000
