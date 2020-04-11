@@ -190,7 +190,7 @@ void loop() {
     digitalWriteFast(IRQ, LOW);
   }
 
-  delayMicroseconds(10); // Slow down system to give Teensy time to handle USB Serial
+  delayMicroseconds(5); // Slow down system to give Teensy time to handle USB Serial
 }
 
 FASTRUN void ISR() {
