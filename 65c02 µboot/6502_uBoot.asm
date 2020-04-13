@@ -12,34 +12,28 @@
 ;  $8000-$FFFF ROM
 ;-------------------------------------------------------------------------
 
-V_RTC_SEC 		= $0
+V_RTC_SEC 		= $0 					; RTC time variables
 V_RTC_MIN 		= $1
 V_RTC_HR 		= $2
 
-V_DISP_CHANGED 	= $3
-V_JUMP_REQ 		= $4
-V_JUMP_TGT_LO 	= $5
-V_JUMP_TGT_HI 	= $6
+V_P_STR_LO  	= $3 					; String address pointer, used for printing
+V_P_STR_HI  	= $4 					; String address pointer, used for printing
+S_DATA_RDY 		= $5 					; Data available from serial bus, used by NMI
+S_IN_BYTE 		= $6					; Input byte from serial bus, used by NMI
+S_BYTE_COUNT	= $7 					; Incoming byte counter, used by serial test app
 
-V_KEYSTROKE 	= $7
-V_LCD_SELECTION = $8
-V_JMP_SELECTION = $9
+V_DISP_CHANGED 	= $8 					; Has bootloader menu state changed (need to redraw)
+V_JUMP_REQ 		= $9 					; Is there a jump request from user
+V_KEYSTROKE 	= $10 					; User keystroke variable
+V_LCD_SELECTION = $11					; Current menu item
+V_JMP_SELECTION = $12 					; Selected item
+V_IN_SUBMENU 	= $13 					; Are we in main menu (or builtin app menu)
+V_MAX_ENTRIES 	= $14 					; Number of entries in current submenu
 
-V_P_STR_LO  	= $10
-V_P_STR_HI  	= $11
-
-V_IN_SUBMENU 	= $12 					; Are we in main menu (or builtin app menu)
-V_MAX_ENTRIES 	= $13
-
-S_DATA_RDY 		= $14 					; Data available from serial bus
-S_IN_BYTE 		= $15					; Input byte from serial bus
-
-S_BYTE_COUNT_LO	= $16
-S_BYTE_COUNT_HI = $17
-
-CURR_BLOCK		= $20
-CURR_ADDR_L 	= $21
-CURR_ADDR_H 	= $22
+CURR_BLOCK		= $15 					; Current payload # being received over serial
+CURR_ADDR_L 	= $16 					; Address to write payload byte to
+CURR_ADDR_H 	= $17 					; Address to write payload byte to
+CHECKSUM 		= $18 					; Checksum, calculated per 128-byte payload
 
 USR_PROG 		= $0200 				; Start of user program storage in RAM
 	
@@ -63,7 +57,7 @@ IER 			= $600E
 ;  Constants
 ;-------------------------------------------------------------------------
 
-LCD_NUM_MASK 	= %00110000
+LCD_NUM_MASK 	= %00110000 			; Decimal digit to ascii offset
 
 LCD_E  			= %10000000 			; In PORTA
 LCD_RW 			= %01000000	
@@ -140,9 +134,9 @@ RESET:			SEI 					; Disable interrupts for the duration of reset sequence
 				INC V_DISP_CHANGED 		; Pre-set display change request to trigger LCD update in bootloader main code
 
   				; Initialize RTC - VIA T2 to give 1s interrupts:
-  				STZ $0					; Zero RTC count
-  				STZ $1
-  				STZ $2
+  				STZ V_RTC_SEC				; Zero RTC count
+  				STZ V_RTC_MIN
+  				STZ V_RTC_HR
 				
   				LDA #15 				; Init T2 low byte with 15 to get 1s interrupts - RTC runs at 8Hz
   				STA T2CL	
@@ -176,19 +170,19 @@ BOOT:			LDA V_DISP_CHANGED 		; Do we need to update display?
 ;-------------------------------------------------------------------------
 
 IRQ: 			PHA
-  				INC $0 					; Increment seconds in RTC count
-  				LDA $0	
+  				INC V_RTC_SEC			; Increment seconds in RTC count
+  				LDA V_RTC_SEC	
   				CMP #60	
   				BCC .irq0 				; Branch if seconds value under 60
   				SBC #60	
-  				STA $0	
-  				INC $1					; Increment minutes in RTC count
-  				LDA $1				
+  				STA V_RTC_SEC	
+  				INC V_RTC_MIN			; Increment minutes in RTC count
+  				LDA V_RTC_MIN				
   				CMP #60	
   				BCC .irq0				; Branch if minutes value under 60
   				SBC #60
-  				STA $1
-  				INC $2
+  				STA V_RTC_MIN
+  				INC V_RTC_HR
 
 .irq0:			LDA #15 				; T2 low byte = 15 to get 1s interrupts
   				STA T2CL	
@@ -212,8 +206,6 @@ NMI: 			LDA ACIA_DATA 			; Teensy interrupts when serial data is available
 ;-------------------------------------------------------------------------
 
 INIT_VARS: 		STZ V_DISP_CHANGED 
-				STZ V_JUMP_TGT_LO
-				STZ V_JUMP_TGT_HI
 				STZ V_P_STR_LO 
 				STZ V_P_STR_HI 
 				STZ V_JUMP_REQ
@@ -245,7 +237,7 @@ APP_RUN: 		JMP USR_PROG
 
 APP_LOAD_RUN: 	JSR READ_PROG
 				JSR LCD_CLEAR	
-				JMP $0200
+				JMP USR_PROG
 
 
 ;-------------------------------------------------------------------------
@@ -325,20 +317,28 @@ READ_PROG: 		LDA #1			 		; Init transfer variables
 				BNE .rpfail
 
 				; Receive payload
+				STZ CHECKSUM 			; Reset checksum
 				LDX #127
 .rp_rcv			JSR SER_GET_CHR
-				STA (CURR_ADDR_L)
+				STA (CURR_ADDR_L)		; Store received byte
 				INC CURR_ADDR_L
 				BNE .rp0 				; If rolled over to zero, increment high byte
 				INC CURR_ADDR_H
-.rp0 			DEX
+.rp0 			CLC 					; Clear carry, add current byte to checksum and store it					
+				ADC CHECKSUM
+				STA CHECKSUM
+				DEX
 				BPL .rp_rcv 			; Receive new input byte if payload is not complete
 
-				; Receive checksum, TODO calculate receive checksum and compare against A
-				JSR SER_GET_CHR
+				; Receive checksum, send ACK and increase block count if ok, send NAK if not ok
+				JSR SER_GET_CHR 
+				CMP CHECKSUM
+				BNE .rp1 				; Branch if checksum mismatch
+				INC CURR_BLOCK 			; Checksum match, so increase block count
 				LDA #ACK 				; Send ACK to acknowledge that checksum is ok
-				STA ACIA_DATA
-				INC CURR_BLOCK
+				BRA .rp2
+.rp1			LDA #NAK 				; Branching here on checksum mismatch, send NAK to indicate checksum fail
+.rp2			STA ACIA_DATA
 				JMP .rp_blockstart		; Get new block of data
 
 .rpdone 		JSR LCD_CLEAR
@@ -964,8 +964,7 @@ APP_SER_TEST: 	LDA #%00000001			; Clear display
   				JSR LCD_PRINT
   				STZ S_DATA_RDY 			; Prepare serial print variables
   				STZ S_IN_BYTE
-  				STZ S_BYTE_COUNT_LO
-  				STZ S_BYTE_COUNT_HI
+  				STZ S_BYTE_COUNT
   				JMP SER_TEST_MAIN
 
 
@@ -985,7 +984,7 @@ SER_TEST_MAIN:	LDA ACIA_STATUS 		; Is new data available?
   				LDA #<str_rcvd
   				STA V_P_STR_LO
   				JSR SER_P_STR
-				LDA S_BYTE_COUNT_LO
+				LDA S_BYTE_COUNT
 				JSR SER_P_INT3
 				LDA #>str_bytes
   				STA V_P_STR_HI	
@@ -996,7 +995,7 @@ SER_TEST_MAIN:	LDA ACIA_STATUS 		; Is new data available?
 				JSR DELAY_X	
 				JMP APP_SER_TEST		; Then reset app (clear screen)
 
-.sit0 			INC S_BYTE_COUNT_LO 	; Increase byte count (0-255)
+.sit0 			INC S_BYTE_COUNT 	 	; Increase byte count (0-255)
 				JSR LCD_PRINT 			; Any other char, so print it to LCD
 				STZ S_DATA_RDY 			; Clear data available bit
 				JMP SER_TEST_MAIN

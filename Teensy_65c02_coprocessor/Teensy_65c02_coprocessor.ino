@@ -1,3 +1,5 @@
+// Compile for Teensy 4.0, USB type "Serial", CPU speed 912 MHz (cooling required), Optimize "Fast"
+
 #define RESTART_ADDR 0xE000ED0C
 #define READ_RESTART() (*(volatile uint32_t *)RESTART_ADDR)
 #define WRITE_RESTART(val) ((*(volatile uint32_t *)RESTART_ADDR) = (val))

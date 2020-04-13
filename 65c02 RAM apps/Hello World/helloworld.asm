@@ -159,10 +159,11 @@ LCD_PRINT:      PHA                     ; First send 4 MSB
                 STA PORTA               ; Clear E bits
                 RTS
 
+
 ;-------------------------------------------------------------------------
 ;  String storage
 ;-------------------------------------------------------------------------
 
 str_helloworld:
-	db "Hello World!                            From RAM $0200",255
+	db "Hello world!                            From RAM $0200",255
 

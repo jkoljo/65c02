@@ -65,7 +65,7 @@ def get_packages(file="a.out", with_checksum=True):
 
 
 if __name__ == '__main__':
-    print("JMODEM binary transfer application v0.1")
+    print("JMODEM binary transfer application v0.2")
     packages = get_packages(file="../65c02 RAM apps/Hello World/hello.bin", with_checksum=True)
     payloadSize = len(packages)*128
     transferSize = len(packages)*131
