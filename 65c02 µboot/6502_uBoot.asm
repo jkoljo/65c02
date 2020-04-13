@@ -77,7 +77,8 @@ KEY_DN 			= %00010000
 		
 SR_IDLE 		= %00000011 			; In PORTA, no conversion triggered, SR in parallel listen mode
 SR_CONVERT  	= %00000001		
-SR_LATCH 		= %00000010		
+SR_LATCH 		= %00000010
+PORTA_IDLE 		= SR_IDLE		
 		
 GP0 			= %01000000 			; Spare I/O of PORTA..
 GP1				= %00100000		
@@ -114,8 +115,9 @@ RESET:			SEI 					; Disable interrupts for the duration of reset sequence
 
   				; Initialize VIA	
   				LDA #DDRA_BITS			; Top 3 and lowest pin on A to output
-  				STA DDRA	
-  				STZ PORTA	
+  				STA DDRA
+  				LDA #PORTA_IDLE	
+  				STA PORTA	
 					
   				LDA #DDRB_BITS			; Low 4 pins on port B to output
   				STA DDRB	
@@ -696,6 +698,7 @@ WAIT_LCD:		STZ DDRB         		; Set all pins on PORTB to input
 
 ;-------------------------------------------------------------------------
 ;  Subroutine to do a delay that takes more than 1000 CPU cycles
+;  Destroys X
 ;-------------------------------------------------------------------------
 
 DELAY:			LDX #255
@@ -710,12 +713,12 @@ DELAY:			LDX #255
 ;-------------------------------------------------------------------------
 
 LCD_CMD_8B:		STA PORTB
-				LDA PORTA
-				EOR #(LCD_E | LCD_RS | LCD_RW)
+				LDA PORTA				; Get PORTA and clear all LCD control bits
+				AND #(~LCD_E & ~LCD_RS & ~LCD_RW & %11111111)
 				STA PORTA
-				ORA #LCD_E
+				ORA #LCD_E 				; Set E
 				STA PORTA
-				EOR #LCD_E
+				EOR #LCD_E 				; Clear E
 				STA PORTA
 				RTS
 
@@ -732,20 +735,22 @@ LCD_CMD_4B:		PHA 					; First send 4 MSB
   				LSR A
   				AND #%00001111
   				STA PORTB
-  				LDA #SR_IDLE
-  				STA PORTA 				; Clear RS/RW/E bits
-  				LDA #(LCD_E | SR_IDLE) 	; Set E bit to send instruction
-  				STA PORTA
-  				LDA #SR_IDLE
-  				STA PORTA 				; Clear RS/RW/E bits
+				LDA PORTA				; Get PORTA and clear all LCD control bits
+				AND #(~LCD_E & ~LCD_RS & ~LCD_RW & %11111111)
+				STA PORTA
+				ORA #LCD_E 				; Set E
+				STA PORTA
+				EOR #LCD_E 				; Clear E
+				STA PORTA
   				PLA 					; Then send 4 LSB
   				PHA
   				AND #%00001111
   				STA PORTB
-  				LDA #(LCD_E | SR_IDLE) 	; Set E bit to send instruction
-  				STA PORTA
-  				LDA #SR_IDLE
-  				STA PORTA 				; Clear RS/RW/E bits
+				LDA PORTA
+				ORA #LCD_E 				; Set E
+				STA PORTA
+				EOR #LCD_E 				; Clear E
+				STA PORTA
   				PLA
   				RTS
 
@@ -836,17 +841,12 @@ sub10_2:		SBC #10
 ;  Subroutine to initialize LCD to 4-bit mode, set it up and clear it
 ;-------------------------------------------------------------------------
 
-INIT_LCD: 		LDA #%00000011			; Put LCD into 4 bit mode
+INIT_LCD: 		LDY #2	
+.ilcd0			LDA #%00000011			; Write this 3 times to put LCD into a known state
   				JSR LCD_CMD_8B
   				JSR DELAY
-				
-  				LDA #%00000011
-  				JSR LCD_CMD_8B
-  				JSR DELAY
-				
-  				LDA #%00000011
-  				JSR LCD_CMD_8B
-  				JSR DELAY
+  				DEY
+  				BPL .ilcd0
 				
   				LDA #%00000010
   				JSR LCD_CMD_8B	
@@ -1013,7 +1013,7 @@ str_uboot_title1:
 	db "65c02 MicroBoot",255
 
 str_uboot_title2:
-	db "Version 0.2.1",255
+	db "Version 0.2.2",255
 
 str_credits1:
 	db "Juha Koljonen",255
