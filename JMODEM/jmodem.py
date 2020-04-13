@@ -29,23 +29,62 @@ def connect_to_teensy(port):
     return serial_device
 
 
+def get_packages(file="a.out", with_checksum=True):
+    '''
+    Read binary file to 128 byte payload chunks to send forward, with or without trailing checksum
+    '''
+    temp_packages = []
+    curr_package = []
+    byte_count = 0
+    with open(file, "rb") as f:
+        byte = f.read(1)
+        while byte:
+            curr_package.append(byte)
+            byte_count += 1
+            if byte_count >= 128:
+                temp_packages.append(curr_package)
+                curr_package = []
+                byte_count = 0
+            byte = f.read(1)
+
+    if byte_count > 0:  # Pad the remainder of the last package with zero bytes
+        while byte_count < 128:
+            curr_package.append(b'\x00')
+            byte_count += 1
+        temp_packages.append(curr_package)
+
+    if with_checksum:
+        for package in range(len(temp_packages)):
+            chksum = 0
+            for byte in temp_packages[package]:
+                chksum += int.from_bytes(byte, "little")
+            chksum %= 256
+            temp_packages[package].append(chksum.to_bytes(1, 'little'))
+
+    return temp_packages
+
+
 if __name__ == '__main__':
-    # Connect to the teensy
+    print("JMODEM binary transfer application v0.1")
+    packages = get_packages(file="../65c02 RAM apps/Hello World/hello.bin", with_checksum=True)
+    payloadSize = len(packages)*128
+    transferSize = len(packages)*131
+    ramUtilization = payloadSize/28159
+    print("Parsed a {} byte payload, using {:.2f}% of available RAM".format(payloadSize, ramUtilization*100))
+
+    if ramUtilization > 1:
+        print("ERR: Package too large for target, exiting..")
+        exit()
+
+    # Connect to the target
     print("Connecting to device..")
     serial_device = connect_to_teensy('COM9')
 
     time.sleep(0.1)       # allow connection to be established
-    if serial_device.in_waiting:
-        serial_device.reset_input_buffer()
+    serial_device.reset_input_buffer()
 
-    blockNumber = 1
-    amount = 5          # how many messages to send
-    countt = 0          # count of messages suffessfully sent
-    ackCount = 0        # count successful sends
-    badAckCount = 0     # how many messages had negative ack
-
+    # Send ENQ to start transaction, wait for reply
     serial_device.write(ENQ.to_bytes(1, 'little'))
-
     while not serial_device.in_waiting:
         continue
 
@@ -56,44 +95,36 @@ if __name__ == '__main__':
         exit()
 
     tIn = time.time()
-
-    for y in range(10):
+    currBlock = 1
+    while currBlock <= len(packages):
         # Block: SOH, Block Number, 128 bytes of data, chksum
-        print("Sending block {}..".format(blockNumber), end ="")
+        print("Sending block {}..".format(currBlock), end ="")
         serial_device.write(SOH.to_bytes(1, 'little'))
-        serial_device.write(blockNumber.to_bytes(1, 'little'))
-        for x in range(128):
-            data = 0
-            serial_device.write(data.to_bytes(1, 'little'))
+        serial_device.write(currBlock.to_bytes(1, 'little'))
+        for byte in range(129):    # 128 byte payload + pre-calculated checksum
+            serial_device.write(packages[currBlock-1][byte])
             time.sleep(0.001)   # Prevent overloading Teensy buffers
-        chksum = 0
-        serial_device.write(chksum.to_bytes(1, 'little'))
 
+        # Get reply ack or nak, based on checksum validation result
         while not serial_device.in_waiting:
             continue
-
         reply = int.from_bytes(serial_device.read(1), 'little')
 
         if reply == ACK:
-            print(" OK!".format(blockNumber))
-            blockNumber += 1
+            print(" OK!".format(currBlock))
+            currBlock += 1
+        elif reply == NAK:
+            print(" checksum err - resending block {}".format(reply, currBlock))
         else:
-            print("error - resending block {}".format(reply, blockNumber))
+            print("Unknown reply {}, exiting..".format(reply))
+            serial_device.write(EOT.to_bytes(1, 'little'))
+            exit()
 
     serial_device.write(EOT.to_bytes(1, 'little'))
-    tOut = time.time()
-    txTime = tOut-tIn
-    size = (blockNumber-1)*131  # Total amount of sent bytes
-    speed = size/txTime
+    txTime = time.time()-tIn
+    speed = transferSize/txTime
     print("Transfer complete in {:.2f}s".format(txTime))
-    print("Sent {:.0f} bytes @ {:.2f} bytes per second".format(size, speed))
+    print("Sent {:.0f} bytes @ {:.2f} bytes per second".format(transferSize, speed))
 
-    while serial_device.in_waiting:
-        print(serial_device.read())
+    serial_device.flush()
     exit()
-
-    # Printing the speeds
-    # print(tOut - tIn)
-    # print 'Average time for one communication: (%f) seconds.' % (1.0 * (tOut - tIn) / amount)
-    # print 'Sent = (%d), Received = (%d)' % (amount, countt)
-    # print Wrong AckNum = (%d), Not Equals = (%d)' % (wrongAck, noEquals)
