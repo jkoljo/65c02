@@ -103,7 +103,7 @@ if __name__ == '__main__':
         serial_device.write(currBlock.to_bytes(1, 'little'))
         for byte in range(129):    # 128 byte payload + pre-calculated checksum
             serial_device.write(packages[currBlock-1][byte])
-            time.sleep(0.001)   # Prevent overloading Teensy buffers
+            #time.sleep(0.001)   # Prevent overloading Teensy buffers
 
         # Get reply ack or nak, based on checksum validation result
         while not serial_device.in_waiting:
