@@ -134,7 +134,7 @@ RESET:			SEI 					; Disable interrupts for the duration of reset sequence
 				INC V_DISP_CHANGED 		; Pre-set display change request to trigger LCD update in bootloader main code
 
   				; Initialize RTC - VIA T2 to give 1s interrupts:
-  				STZ V_RTC_SEC				; Zero RTC count
+  				STZ V_RTC_SEC			; Zero RTC count
   				STZ V_RTC_MIN
   				STZ V_RTC_HR
 				
@@ -672,25 +672,30 @@ LCD_CLEAR: 		LDA #%00000001			; Clear display
 ;-------------------------------------------------------------------------
 
 WAIT_LCD:		STZ DDRB         		; Set all pins on PORTB to input
-				LDA #SR_IDLE
-				STA PORTA 				; Clear all LCD (RS/RW/E) bits
+				LDA PORTA				; Get PORTA and clear all LCD control bits
+				AND #(~LCD_E & ~LCD_RS & ~LCD_RW & %11111111)
+				ORA #LCD_RW 			; Set RW bit
+				STA PORTA
 
-.lbw0: 		 	LDA #(LCD_RW | SR_IDLE)
-  				STA PORTA
-  				LDA #(LCD_E | LCD_RW | SR_IDLE)
+.lbw0: 		 	LDA PORTA
+  				ORA #LCD_E 				; Set E bit
   				STA PORTA
                 LDA PORTB             	; Load LCD data register (with busy flag) into A
-                PHA 					; Then cycle E again to dump out the AC registers
-				LDA #(LCD_RW | SR_IDLE)
-  				STA PORTA
-  				LDA #(LCD_E | LCD_RW | SR_IDLE)
-  				STA PORTA
- 				PLA
+                PHA 					; Temporarily store data register
+                LDA PORTA 				; Then cycle E again to dump out the AC registers
+                EOR #LCD_E
+                STA PORTA
+                ORA #LCD_E
+                STA PORTA
+                EOR #LCD_E
+                STA PORTA
+ 				PLA 					; Restore data register to A
                 AND #LCD_BUSY         	; Mask the LCD busy bit flag
                 BNE .lbw0        	 	; If busy bit is NOT clear we repeat check
 
-  				LDA #SR_IDLE 			; Clear all LCD (RS/RW/E) bits
-  				STA PORTA 
+  				LDA PORTA				; Get PORTA and clear all LCD control bits
+				AND #(~LCD_E & ~LCD_RS & ~LCD_RW & %11111111)
+				STA PORTA
                 LDA #DDRB_BITS         	; Set PORTB to normal direction
                 STA DDRB
                 RTS
@@ -909,17 +914,17 @@ DRAW_TEMP_TIME:	JSR GET_ADC 			; Read out data in SR and print it
   				LDA #%00010100			; Move display to the right (space)
   				JSR LCD_CMD_4B
 				
-  				LDA $2 					; Get RTC seconds and print them
+  				LDA V_RTC_HR			; Get RTC hours and print them
   				JSR LCD_P_INT2
   				LDA #'h'
   				JSR LCD_PRINT
 				
-  				LDA $1 					; Get RTC seconds and print them
+  				LDA V_RTC_MIN			; Get RTC minutes and print them
   				JSR LCD_P_INT2
   				LDA #'m'
   				JSR LCD_PRINT
 					
-  				LDA $0 					; Get RTC seconds and print them
+  				LDA V_RTC_SEC			; Get RTC seconds and print them
   				JSR LCD_P_INT2
   				LDA #'s'
   				JSR LCD_PRINT
@@ -962,8 +967,6 @@ APP_SER_TEST: 	LDA #%00000001			; Clear display
   				JSR WAIT_LCD 			; LCD is busy after op
   				LDA #'>'
   				JSR LCD_PRINT
-  				STZ S_DATA_RDY 			; Prepare serial print variables
-  				STZ S_IN_BYTE
   				STZ S_BYTE_COUNT
   				JMP SER_TEST_MAIN
 
@@ -976,7 +979,7 @@ SER_TEST_MAIN:	LDA ACIA_STATUS 		; Is new data available?
 				AND #%00001000
 				BEQ SER_TEST_MAIN 		; If no, check again
 				LDA ACIA_DATA 			; If yes, load input byte
-				CMP #10
+				CMP #10 				; Check if result is \n
 				BNE .sit0 				; Continue to counting bytes and printing if not \n
 
 				LDA #>str_rcvd 		 	; Got \n, so report received byte count back to serial..
@@ -1012,7 +1015,7 @@ str_uboot_title1:
 	db "65c02 MicroBoot",255
 
 str_uboot_title2:
-	db "Version 0.2.2",255
+	db "Version 0.2.3",255
 
 str_credits1:
 	db "Juha Koljonen",255

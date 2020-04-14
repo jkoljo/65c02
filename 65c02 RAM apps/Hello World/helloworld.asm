@@ -12,36 +12,30 @@
 ;  $8000-$FFFF ROM
 ;-------------------------------------------------------------------------
 
-V_RTC_SEC 		= $0
-V_RTC_MIN 		= $1
-V_RTC_HR 		= $2
+V_RTC_SEC       = $0                    ; RTC time variables
+V_RTC_MIN       = $1
+V_RTC_HR        = $2
 
-V_DISP_CHANGED 	= $3
-V_JUMP_REQ 		= $4
-V_JUMP_TGT_LO 	= $5
-V_JUMP_TGT_HI 	= $6
+V_P_STR_LO      = $3                    ; String address pointer, used for printing
+V_P_STR_HI      = $4                    ; String address pointer, used for printing
+S_DATA_RDY      = $5                    ; Data available from serial bus, used by NMI
+S_IN_BYTE       = $6                    ; Input byte from serial bus, used by NMI
+S_BYTE_COUNT    = $7                    ; Incoming byte counter, used by serial test app
 
-V_KEYSTROKE 	= $7
-V_LCD_SELECTION = $8
-V_JMP_SELECTION = $9
+V_DISP_CHANGED  = $8                    ; Has bootloader menu state changed (need to redraw)
+V_JUMP_REQ      = $9                    ; Is there a jump request from user
+V_KEYSTROKE     = $10                   ; User keystroke variable
+V_LCD_SELECTION = $11                   ; Current menu item
+V_JMP_SELECTION = $12                   ; Selected item
+V_IN_SUBMENU    = $13                   ; Are we in main menu (or builtin app menu)
+V_MAX_ENTRIES   = $14                   ; Number of entries in current submenu
 
-V_P_STR_LO  	= $10
-V_P_STR_HI  	= $11
+CURR_BLOCK      = $15                   ; Current payload # being received over serial
+CURR_ADDR_L     = $16                   ; Address to write payload byte to
+CURR_ADDR_H     = $17                   ; Address to write payload byte to
+CHECKSUM        = $18                   ; Checksum, calculated per 128-byte payload
 
-V_IN_SUBMENU 	= $12 					; Are we in main menu (or builtin app menu)
-V_MAX_ENTRIES 	= $13
-
-S_DATA_RDY 		= $14 					; Data available from serial bus
-S_IN_BYTE 		= $15					; Input byte from serial bus
-
-S_BYTE_COUNT_LO	= $16
-S_BYTE_COUNT_HI = $17
-
-CURR_BLOCK		= $20
-CURR_ADDR_L 	= $21
-CURR_ADDR_H 	= $22
-
-USR_PROG 		= $0200 				; Start of user program storage in RAM
+USR_PROG        = $0200                 ; Start of user program storage in RAM
 	
 ACIA_DATA		= $5000
 ACIA_STATUS 	= $5001
