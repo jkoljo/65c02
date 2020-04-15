@@ -7,4 +7,4 @@ Bits and pieces for a breadboard computer project
 
 - J-Modem sender, a Python-based binary transfer app
 
-- Teensy 65c02 coprocessor, a Teensy 4.0 program to emulate an ACIA, but much faster. Keeps up with 1 MHz 65c02 clock. With 912 MHz Teensy speed, it runs fast enough that any number of input/output bytes do not overload Teensy. Continuous data transfers at around 9000-10000 bytes per second work great. Microchess by Peter Jennings transfers in around 0.55-0.60 seconds.
+- Teensy 65c02 coprocessor, a Teensy 4.0 program to emulate an ACIA, but much faster. With 912 MHz Teensy speed, it runs fast enough to reliably keep up with 1 MHz 65c02 clock and any amount of data throughput. Transfer speed with J-Modem sender is around 9000-10000 bytes/second.
