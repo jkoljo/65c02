@@ -57,7 +57,7 @@ IER 			= $600E
 ;  Constants
 ;-------------------------------------------------------------------------
 
-LCD_NUM_MASK 	= %00110000 			; Decimal digit to ascii offset
+ASCII_DEC_OFFSET 	= %00110000 			; Decimal digit to ascii offset
 
 LCD_E  			= %10000000 			; In PORTA
 LCD_RW 			= %01000000	
@@ -378,10 +378,10 @@ READ_PROG: 		LDA #1			 		; Init transfer variables
   				JSR LCD_P_STR
   				
   				TXA
-  				ORA #LCD_NUM_MASK
+  				ORA #ASCII_DEC_OFFSET
   				JSR LCD_PRINT
   				
-  				LDX #30 				; 2 second delay
+  				LDX #60 				; 4 second delay
   				JSR DELAY_X
 				RTS
 
@@ -417,16 +417,6 @@ GOTO_MMENU: 	STZ V_IN_SUBMENU
 				JMP BOOT
 GOTO_BMENU: 	INC V_IN_SUBMENU
 				JMP BOOT
-
-
-;-------------------------------------------------------------------------
-;  Subroutine to delay execution for X * 0.062 (1s/16) seconds
-;-------------------------------------------------------------------------
-
-DELAY_X: 		STX T2CL	
-  				STZ T2CH
-  				WAI
-  				RTS
 
 
 ;-------------------------------------------------------------------------
@@ -564,6 +554,16 @@ DRAW_TITLE:		LDA #>str_uboot_title1
 
 
 ;-------------------------------------------------------------------------
+;  Subroutine to delay execution for X * 0.062 (1s/16) seconds
+;-------------------------------------------------------------------------
+
+DELAY_X: 		STX T2CL	
+  				STZ T2CH
+  				WAI
+  				RTS
+
+
+;-------------------------------------------------------------------------
 ;  Subroutine to print a string to LCD, addressed indirectly, pointer at $10, $11
 ;  Leaves Y loaded with length of printed string
 ;-------------------------------------------------------------------------
@@ -605,35 +605,6 @@ SER_P_STR:		LDY #0 					; Use Y to index through chars
   				JMP .spstr0 			
 .spstr1:		INY 					; Y += 1 to match printed char count
 				RTS
-
-
-;-------------------------------------------------------------------------
-;  Subroutine to print a 3-digit integer to Serial
-;-------------------------------------------------------------------------
-
-SER_P_INT3:		LDX #0 					; 2nd (10ths) digit in accumulator X
-  				LDY #0					; 3rd (100ths) digit in accumulator Y
-sd100_3:		CMP #100 				; Is A larger or equal than 100?
-  				BCS ssub100_3
-sd10_3:			CMP #10					; Is A larger or equal than 10?
-  				BCS ssub10_3
-  				PHA
-  				TYA
-  				ORA #LCD_NUM_MASK
-  				STA ACIA_DATA
-  				TXA
-  				ORA #LCD_NUM_MASK
-  				STA ACIA_DATA
-  				PLA
-  				ORA #LCD_NUM_MASK
-  				STA ACIA_DATA
-  				RTS
-ssub10_3:		SBC #10
-  				INX
-  				JMP sd10_3
-ssub100_3:		SBC #100
-  				INY
-  				JMP sd100_3
 
 
 ;-------------------------------------------------------------------------
@@ -771,75 +742,23 @@ LCD_PRINT:		PHA  					; First send 4 MSB
   				LSR A
   				AND #%00001111
   				STA PORTB
-  				LDA #(LCD_RS | SR_IDLE) 
-  				STA PORTA 				; Set RS; Clear RW/E bits
-  				LDA #(LCD_RS | LCD_E | SR_IDLE) 
-  				STA PORTA 				; Set E bit to send instruction
-  				LDA #(LCD_RS | SR_IDLE) 
-  				STA PORTA 				; Clear E bits
+  				LDA PORTA				; Get PORTA and clear all LCD control bits
+				AND #(~LCD_E & ~LCD_RS & ~LCD_RW & %11111111)
+				ORA #LCD_RS 			; Set RS bit
+				STA PORTA
+				ORA #LCD_E 				; Set E Bit to send instruction
+				STA PORTA 
+				EOR #LCD_E 				; Clear E bit
+				STA PORTA
   				PLA 					; Then send 4 LSB
   				AND #%00001111
   				STA PORTB
-  				LDA #(LCD_RS | LCD_E | SR_IDLE) 
-  				STA PORTA 				; Set E bit to send instruction
-  				LDA #(LCD_RS | SR_IDLE) 
-  				STA PORTA 				; Clear E bits
+  				LDA PORTA
+  				ORA #LCD_E 				; Set E Bit to send instruction
+  				STA PORTA
+  				EOR #LCD_E 				; Clear E bit
+  				STA PORTA
   				RTS
-
-
-;-------------------------------------------------------------------------
-;  Subroutine to print a 3-digit integer to LCD
-;-------------------------------------------------------------------------
-
-LCD_P_INT3:		LDX #0 					; 2nd (10ths) digit in accumulator X
-  				LDY #0					; 3rd (100ths) digit in accumulator Y
-
-d100_3:			CMP #100 				; Is A larger or equal than 100?
-  				BCS sub100_3
-
-d10_3:			CMP #10					; Is A larger or equal than 10?
-  				BCS sub10_3
-  				PHA
-  				TYA
-  				ORA #LCD_NUM_MASK
-  				JSR LCD_PRINT
-  				TXA
-  				ORA #LCD_NUM_MASK
-  				JSR LCD_PRINT
-  				PLA
-  				ORA #LCD_NUM_MASK
-  				JSR LCD_PRINT
-  				RTS
-
-sub10_3:		SBC #10
-  				INX
-  				JMP d10_3
-
-sub100_3:		SBC #100
-  				INY
-  				JMP d100_3
-
-
-;-------------------------------------------------------------------------
-;  Subroutine to print a 2-digit integer to LCD
-;-------------------------------------------------------------------------
-
-LCD_P_INT2: 	LDX #0 					; 2nd (10ths) digit in accumulator X
-
-d10_2:			CMP #10					; Is A larger or equal than 10?
-  				BCS sub10_2
-  				PHA
-  				TXA
-  				ORA #LCD_NUM_MASK
-  				JSR LCD_PRINT
-  				PLA
-  				ORA #LCD_NUM_MASK
-  				JSR LCD_PRINT
-  				RTS
-
-sub10_2:		SBC #10
-  				INX
-  				JMP d10_2
 
 
 ;-------------------------------------------------------------------------
@@ -875,19 +794,81 @@ INIT_LCD: 		LDY #2
 
 
 ;-------------------------------------------------------------------------
-;  Subroutine to get/read ADC values through HW a shift register
+;  Subroutine split a byte into 3 decimal digits, in ASCII format
+;  Yields 1s in A, 10s in X, 100s in Y
 ;-------------------------------------------------------------------------
 
-GET_ADC:		LDA #SR_IDLE 			; SR to parallel (listen) mode, ADC idling
-  				STA PORTA
-  				LDA #SR_CONVERT 		; WD low for min. 600 ns triggers conversion on ADC, keep SR listening 
-  				STA PORTA 
-  				LDA #SR_IDLE			; WR high again, ADC has data available in 600 ns from now, SR listening
-  				STA PORTA
-  				LDA #SR_LATCH			; Latch SR, serial mode
-  				STA PORTA
-  				LDA SR 					; Read SR from previous round. This triggers new async SR read
-  				RTS
+SPLIT_DEC:		LDX #0 					; 10s in X
+  				LDY #0					; 100s in Y
+
+.sd100s			CMP #100 				; Is number larger or equal than 100?
+  				BCC .sd10s				; No, skip to 10s
+  				INY 					; Yes, increase Y
+  				SBC #100 				; And reduce 100 from original number
+  				BRA .sd100s 			; Check again
+
+.sd10s 			CMP #10 				; Is number larger or equal than 10?
+				BCC .sd1s 				; No, skip to 1s
+				INX 					; Yes, increase X
+				SBC #10 				; And reduce 10 from original number
+				BRA .sd10s
+
+.sd1s 			PHA 					; Ones are in A, store it temporarily
+				TXA 					; Get 10s
+				ORA #ASCII_DEC_OFFSET 	; Convert to ascii
+				TAX 					; Store ascii 10s to X
+				TYA 					; Get 100s
+				ORA #ASCII_DEC_OFFSET 	; Convert to ascii
+				TAY 					; Store ascii 100s to Y
+				PLA 					; Get ones
+				ORA #ASCII_DEC_OFFSET 	; Convert to ascii
+				RTS
+
+
+;-------------------------------------------------------------------------
+;  Subroutines to print a 2- and 3-digit integers to Serial
+;-------------------------------------------------------------------------
+
+SER_P_INT3:		JSR SPLIT_DEC
+				PHA 					; Ones to stack
+				TYA 					; Get 100s
+				STA ACIA_DATA
+				TXA 					; Get 10s
+				STA ACIA_DATA
+				PLA 					; Get 1s
+				STA ACIA_DATA 
+				RTS
+
+SER_P_INT2:     JSR SPLIT_DEC
+				PHA 					; Ones to stack
+				TXA 					; Get 10s
+				STA ACIA_DATA
+				PLA 					; Get 1s
+				STA ACIA_DATA 
+				RTS
+
+
+;-------------------------------------------------------------------------
+;  Subroutines to print a 2- and 3-digit integers to LCD
+;-------------------------------------------------------------------------
+
+LCD_P_INT3:		JSR SPLIT_DEC
+				PHA 					; Ones to stack
+				TYA 					; Get 100s
+				JSR LCD_PRINT
+				TXA 					; Get 10s
+				JSR LCD_PRINT
+				PLA 					; Get 1s
+				JSR LCD_PRINT
+				RTS
+
+LCD_P_INT2:     JSR SPLIT_DEC
+				PHA 					; Ones to stack
+				TXA 					; Get 10s
+				JSR LCD_PRINT
+				PLA 					; Get 1s
+				JSR LCD_PRINT
+				RTS
 
 
 ;-------------------------------------------------------------------------
@@ -953,8 +934,24 @@ P_TEMP_C:		TAX
   				PLA
   				TAX
   				LDA LUT_ADC_dec, X
-  				ORA #LCD_NUM_MASK
+  				ORA #ASCII_DEC_OFFSET
   				JSR LCD_PRINT
+  				RTS
+
+
+;-------------------------------------------------------------------------
+;  Subroutine to get/read ADC values through HW a shift register
+;-------------------------------------------------------------------------
+
+GET_ADC:		LDA #SR_IDLE 			; SR to parallel (listen) mode, ADC idling
+  				STA PORTA
+  				LDA #SR_CONVERT 		; WD low for min. 600 ns triggers conversion on ADC, keep SR listening 
+  				STA PORTA 
+  				LDA #SR_IDLE			; WR high again, ADC has data available in 600 ns from now, SR listening
+  				STA PORTA
+  				LDA #SR_LATCH			; Latch SR, serial mode
+  				STA PORTA
+  				LDA SR 					; Read SR from previous round. This triggers new async SR read
   				RTS
 
 
@@ -1015,7 +1012,7 @@ str_uboot_title1:
 	db "65c02 MicroBoot",255
 
 str_uboot_title2:
-	db "Version 0.2.3",255
+	db "Version 0.2.4",255
 
 str_credits1:
 	db "Juha Koljonen",255
